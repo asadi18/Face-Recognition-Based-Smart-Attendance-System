@@ -2,9 +2,7 @@
 
 A Python Flask web application for student attendance using face recognition.
 
-## University
 
-Southern University Bangladesh
 
 ## Features
 
