@@ -1,0 +1,24 @@
+{% extends 'base.html' %} {% block content %}
+<div class="hero">
+  <h1>Face Recognition Based Smart Attendance System</h1>
+  <p>Southern University Bangladesh</p>
+
+  <div class="quick-actions">
+    <a href="/register">Register Student</a>
+    <a href="/attendance" class="green">Take Attendance</a>
+    <a href="/records">View Records</a>
+  </div>
+</div>
+
+<div class="dashboard-grid">
+  <div class="stat-box">
+    <h4>Total Registered Students</h4>
+    <p>{{ total_students }}</p>
+  </div>
+
+  <div class="stat-box">
+    <h4>Today's Attendance</h4>
+    <p>{{ today_attendance }}</p>
+  </div>
+</div>
+{% endblock %}

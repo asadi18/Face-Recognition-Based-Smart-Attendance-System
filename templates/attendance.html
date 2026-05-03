@@ -1,0 +1,39 @@
+{% extends 'base.html' %} {% block content %}
+<h3>Take Attendance</h3>
+
+<div class="form-card">
+  <video id="video" width="520" height="390" autoplay></video>
+  <canvas id="canvas" width="520" height="390" style="display: none"></canvas>
+
+  <form id="attendanceForm" method="POST">
+    <input type="hidden" name="captured_image" id="captured_image" />
+    <button type="button" onclick="captureAttendance()">
+      Capture & Mark Attendance
+    </button>
+  </form>
+</div>
+
+<script>
+  const video = document.getElementById("video");
+
+  navigator.mediaDevices
+    .getUserMedia({ video: true })
+    .then((stream) => {
+      video.srcObject = stream;
+    })
+    .catch(() => {
+      alert("Webcam access denied or webcam not available.");
+    });
+
+  function captureAttendance() {
+    const canvas = document.getElementById("canvas");
+    const context = canvas.getContext("2d");
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const imageData = canvas.toDataURL("image/jpeg");
+    document.getElementById("captured_image").value = imageData;
+    document.getElementById("attendanceForm").submit();
+  }
+</script>
+{% endblock %}

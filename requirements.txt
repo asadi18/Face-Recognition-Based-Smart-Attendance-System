@@ -1,0 +1,7 @@
+Flask
+opencv-python
+face-recognition
+numpy
+pandas
+openpyxl
+Pillow

@@ -1,0 +1,134 @@
+{% extends 'base.html' %} {% block content %}
+<h3>Register Student</h3>
+
+<div class="form-card">
+  <form method="POST" enctype="multipart/form-data">
+    <input type="text" name="name" placeholder="Student Name" required />
+    <input type="text" name="roll" placeholder="Roll No" required />
+    <input type="text" name="department" placeholder="Department (optional)" />
+    <input type="text" name="batch" placeholder="Batch / Semester (optional)" />
+
+    <h4>Capture Image from Webcam</h4>
+
+    <select id="cameraSelect"></select>
+    <button type="button" onclick="startCamera()">Start Camera</button>
+
+    <div class="camera-box">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="canvas" style="display: none"></canvas>
+    </div>
+
+    <input type="hidden" name="captured_image" id="captured_image" />
+
+    <button type="button" onclick="capturePhoto()">Capture Photo</button>
+    <p id="captureStatus"></p>
+
+    <h4>Captured Preview</h4>
+    <img
+      id="preview"
+      style="
+        max-width: 300px;
+        border: 3px solid #142d91;
+        border-radius: 10px;
+        display: none;
+      "
+    />
+
+    <h4>Or Upload Image</h4>
+    <input type="file" name="image" accept="image/png,image/jpeg,image/jpg" />
+
+    <button type="submit">Register Student</button>
+  </form>
+</div>
+
+<script>
+  const video = document.getElementById("video");
+  const cameraSelect = document.getElementById("cameraSelect");
+  const captureStatus = document.getElementById("captureStatus");
+  const preview = document.getElementById("preview");
+  let currentStream = null;
+
+  async function loadCameras() {
+    try {
+      const tempStream = await navigator.mediaDevices.getUserMedia({
+        video: true,
+      });
+      tempStream.getTracks().forEach((track) => track.stop());
+
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const cameras = devices.filter((device) => device.kind === "videoinput");
+
+      cameraSelect.innerHTML = "";
+
+      cameras.forEach((camera, index) => {
+        const option = document.createElement("option");
+        option.value = camera.deviceId;
+        option.text = camera.label || `Camera ${index + 1}`;
+        cameraSelect.appendChild(option);
+      });
+
+      captureStatus.innerText = "Select camera and click Start Camera.";
+    } catch (error) {
+      captureStatus.innerText = "Camera permission denied or camera not found.";
+    }
+  }
+
+  async function startCamera() {
+    try {
+      if (currentStream) {
+        currentStream.getTracks().forEach((track) => track.stop());
+      }
+
+      const selectedCamera = cameraSelect.value;
+
+      currentStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          deviceId: selectedCamera ? { exact: selectedCamera } : undefined,
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: false,
+      });
+
+      video.srcObject = currentStream;
+
+      video.onloadedmetadata = () => {
+        video.play();
+        captureStatus.innerText =
+          "Camera started. Keep face centered and wait 2 seconds before capture.";
+      };
+    } catch (error) {
+      captureStatus.innerText =
+        "Could not start selected camera. Try another camera.";
+    }
+  }
+
+  function capturePhoto() {
+    if (!video.srcObject || video.videoWidth === 0 || video.videoHeight === 0) {
+      captureStatus.innerText =
+        "Camera not ready. Click Start Camera and wait 2 seconds.";
+      return;
+    }
+
+    const canvas = document.getElementById("canvas");
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    const imageData = canvas.toDataURL("image/jpeg", 0.95);
+
+    document.getElementById("captured_image").value = imageData;
+
+    preview.src = imageData;
+    preview.style.display = "block";
+
+    captureStatus.innerText =
+      "Photo captured successfully. If preview is clear, click Register Student.";
+  }
+
+  loadCameras();
+</script>
+{% endblock %}
