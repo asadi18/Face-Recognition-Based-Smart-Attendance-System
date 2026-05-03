@@ -3,6 +3,8 @@ numpy==1.26.4
 pandas
 openpyxl
 Pillow
-face-recognition
-dlib
+deepface
+tensorflow==2.15.0
+tf-keras
+opencv-python-headless
 gunicorn

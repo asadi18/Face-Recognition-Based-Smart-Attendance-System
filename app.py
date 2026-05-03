@@ -1,11 +1,9 @@
 import os
 import base64
 from datetime import datetime
-from PIL import Image
-import numpy as np
 
-import face_recognition
 import pandas as pd
+from deepface import DeepFace
 from flask import Flask, render_template, request, redirect, url_for, flash, send_file
 from werkzeug.utils import secure_filename
 
@@ -23,13 +21,13 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 def setup_excel_files():
     try:
         pd.read_excel(STUDENTS_FILE, engine="openpyxl")
-    except:
+    except Exception:
         df = pd.DataFrame(columns=["Name", "Roll", "Department", "Batch", "Image"])
         df.to_excel(STUDENTS_FILE, index=False, engine="openpyxl")
 
     try:
         pd.read_excel(ATTENDANCE_FILE, engine="openpyxl")
-    except:
+    except Exception:
         df = pd.DataFrame(columns=["Name", "Roll", "Date", "Time", "Status"])
         df.to_excel(ATTENDANCE_FILE, index=False, engine="openpyxl")
 
@@ -46,67 +44,50 @@ def save_base64_image(base64_data, filename):
     return image_path
 
 
-
-def get_face_encoding(image_path):
+def validate_face(image_path):
     try:
-        pil_image = Image.open(image_path).convert("RGB")
-
-        rgb_image = np.array(pil_image)
-        rgb_image = rgb_image[:, :, :3]
-        rgb_image = np.ascontiguousarray(rgb_image, dtype=np.uint8)
-
-        print("DEBUG IMAGE:", rgb_image.shape, rgb_image.dtype)
-
-        face_locations = face_recognition.face_locations(
-            rgb_image,
-            number_of_times_to_upsample=3,
-            model="hog"
+        DeepFace.extract_faces(
+            img_path=image_path,
+            detector_backend="opencv",
+            enforce_detection=True
         )
-
-        print("DEBUG FACES:", face_locations)
-
-        if len(face_locations) == 0:
-            return None
-
-        encodings = face_recognition.face_encodings(
-            rgb_image,
-            known_face_locations=face_locations,
-            num_jitters=1,
-            model="small"
-        )
-
-        if len(encodings) == 0:
-            return None
-
-        return encodings[0]
-
+        return True
     except Exception as e:
-        print("Face encoding error:", e)
-        return None
+        print("Face validation error:", e)
+        return False
 
 
-
-
-def load_registered_faces():
+def find_matching_student(captured_image_path):
     students = pd.read_excel(STUDENTS_FILE, engine="openpyxl")
 
-    known_encodings = []
-    known_students = []
+    if students.empty:
+        return None
 
     for _, row in students.iterrows():
-        image_path = row["Image"]
+        registered_image_path = row["Image"]
 
-        if os.path.exists(image_path):
-            encoding = get_face_encoding(image_path)
+        if not os.path.exists(registered_image_path):
+            continue
 
-            if encoding is not None:
-                known_encodings.append(encoding)
-                known_students.append({
+        try:
+            result = DeepFace.verify(
+                img1_path=captured_image_path,
+                img2_path=registered_image_path,
+                model_name="Facenet",
+                detector_backend="opencv",
+                enforce_detection=False
+            )
+
+            if result.get("verified"):
+                return {
                     "Name": row["Name"],
                     "Roll": str(row["Roll"])
-                })
+                }
 
-    return known_encodings, known_students
+        except Exception as e:
+            print("Matching error:", e)
+
+    return None
 
 
 @app.route("/")
@@ -114,10 +95,10 @@ def index():
     setup_excel_files()
 
     students = pd.read_excel(STUDENTS_FILE, engine="openpyxl")
-    attendance = pd.read_excel(ATTENDANCE_FILE, engine="openpyxl")
+    attendance_df = pd.read_excel(ATTENDANCE_FILE, engine="openpyxl")
 
     today = datetime.now().strftime("%Y-%m-%d")
-    today_attendance = attendance[attendance["Date"] == today]
+    today_attendance = attendance_df[attendance_df["Date"].astype(str) == today]
 
     return render_template(
         "index.html",
@@ -142,7 +123,7 @@ def register():
             flash("Name and Roll No are required.", "danger")
             return redirect(url_for("register"))
 
-        if not captured_image and not uploaded_image:
+        if not captured_image and (not uploaded_image or uploaded_image.filename == ""):
             flash("Please capture or upload a face image.", "danger")
             return redirect(url_for("register"))
 
@@ -158,15 +139,16 @@ def register():
             image_path = save_base64_image(captured_image, filename)
         else:
             safe_name = secure_filename(uploaded_image.filename)
-            filename = f"{roll}_{safe_name}"
+            filename = f"{roll}_{datetime.now().strftime('%Y%m%d%H%M%S')}_{safe_name}"
             image_path = os.path.join(UPLOAD_FOLDER, filename)
             uploaded_image.save(image_path)
 
-        encoding = get_face_encoding(image_path)
+        face_valid = validate_face(image_path)
 
-        if encoding is None:
+        if not face_valid:
             if os.path.exists(image_path):
                 os.remove(image_path)
+
             flash("No face found. Please use a clear front-facing image.", "danger")
             return redirect(url_for("register"))
 
@@ -201,57 +183,47 @@ def attendance():
         filename = f"attendance_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
         image_path = save_base64_image(captured_image, filename)
 
-        unknown_encoding = get_face_encoding(image_path)
+        face_valid = validate_face(image_path)
 
-        if unknown_encoding is None:
+        if not face_valid:
             flash("No face found. Please stand clearly in front of webcam.", "danger")
             return redirect(url_for("attendance"))
 
-        known_encodings, known_students = load_registered_faces()
+        student = find_matching_student(image_path)
 
-        if len(known_encodings) == 0:
-            flash("No registered students found.", "danger")
+        if not student:
+            flash("Face not recognized. Student not registered.", "danger")
             return redirect(url_for("attendance"))
 
-        face_distances = face_recognition.face_distance(known_encodings, unknown_encoding)
-        best_match_index = np.argmin(face_distances)
+        name = student["Name"]
+        roll = student["Roll"]
 
-        tolerance = 0.50
+        attendance_df = pd.read_excel(ATTENDANCE_FILE, engine="openpyxl")
 
-        if face_distances[best_match_index] <= tolerance:
-            student = known_students[best_match_index]
-            name = student["Name"]
-            roll = student["Roll"]
+        today = datetime.now().strftime("%Y-%m-%d")
+        current_time = datetime.now().strftime("%H:%M:%S")
 
-            attendance_df = pd.read_excel(ATTENDANCE_FILE, engine="openpyxl")
+        already_marked = attendance_df[
+            (attendance_df["Roll"].astype(str) == str(roll)) &
+            (attendance_df["Date"].astype(str) == today)
+        ]
 
-            today = datetime.now().strftime("%Y-%m-%d")
-            current_time = datetime.now().strftime("%H:%M:%S")
+        if not already_marked.empty:
+            flash(f"Attendance already marked today for {name} - Roll {roll}.", "warning")
+            return redirect(url_for("attendance"))
 
-            already_marked = attendance_df[
-                (attendance_df["Roll"].astype(str) == str(roll)) &
-                (attendance_df["Date"] == today)
-            ]
+        new_attendance = pd.DataFrame([{
+            "Name": name,
+            "Roll": roll,
+            "Date": today,
+            "Time": current_time,
+            "Status": "Present"
+        }])
 
-            if not already_marked.empty:
-                flash(f"Attendance already marked today for {name} - Roll {roll}.", "warning")
-                return redirect(url_for("attendance"))
+        attendance_df = pd.concat([attendance_df, new_attendance], ignore_index=True)
+        attendance_df.to_excel(ATTENDANCE_FILE, index=False, engine="openpyxl")
 
-            new_attendance = pd.DataFrame([{
-                "Name": name,
-                "Roll": roll,
-                "Date": today,
-                "Time": current_time,
-                "Status": "Present"
-            }])
-
-            attendance_df = pd.concat([attendance_df, new_attendance], ignore_index=True)
-            attendance_df.to_excel(ATTENDANCE_FILE, index=False, engine="openpyxl")
-
-            flash(f"Attendance marked successfully for {name} - Roll {roll}.", "success")
-        else:
-            flash("Face not recognized. Student not registered.", "danger")
-
+        flash(f"Attendance marked successfully for {name} - Roll {roll}.", "success")
         return redirect(url_for("attendance"))
 
     return render_template("attendance.html")
@@ -260,8 +232,10 @@ def attendance():
 @app.route("/records")
 def records():
     setup_excel_files()
+
     attendance_df = pd.read_excel(ATTENDANCE_FILE, engine="openpyxl")
     records = attendance_df.to_dict(orient="records")
+
     return render_template("records.html", records=records)
 
 
